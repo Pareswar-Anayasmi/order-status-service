@@ -8,6 +8,7 @@ import com.mongodb.client.MongoDatabase;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.bson.Document;
+import org.bson.types.ObjectId;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 import java.util.ArrayList;
@@ -32,13 +33,26 @@ public class MangoProducerController {
         try (MongoClient mongoClient = MongoClients.create(mongoUrl)) {
             MongoDatabase database = mongoClient.getDatabase("kafka_poc");
             MongoCollection<Document> collection = database.getCollection("Orders");
+
             for (Document doc : collection.find()) {
+                if (doc == null) continue;
+
+                String objectIdString = null;
+                Object objectIdRaw = doc.get("_id");
+
+                if (objectIdRaw instanceof ObjectId) {
+                    objectIdString = ((ObjectId) objectIdRaw).toHexString();
+                } else if (objectIdRaw instanceof Document) {
+                    // _id stored as Document with $oid key
+                    Document idDoc = (Document) objectIdRaw;
+                    objectIdString = idDoc.getString("$oid");
+                }
+
                 Document payload = doc.get("payload", Document.class);
-                //ObjectId objectId = doc.getObjectId("_id");
-                if (payload != null) {
+                if (payload != null && objectIdString != null) {
                     Document after = payload.get("after", Document.class);
                     if (after != null) {
-                       // after.put("id", objectId.toHexString()); // Convert ObjectId to string
+                        after.put("id", objectIdString); // Attach string id
                         ordersList.add(after);
                     }
                 }
@@ -64,7 +78,9 @@ public class MangoProducerController {
             MongoCollection<Document> collection = database.getCollection("Orders");
             log.info("Update Request called.");
             // Convert String ID to ObjectId
-            Document filter = new Document("payload.after.order_id", id);
+            ObjectId objectId = new ObjectId(id);
+
+            Document filter = new Document("_id", objectId);
 
             // Prepare update fields inside payload.after
             Document updateFields = new Document();
